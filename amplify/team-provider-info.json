@@ -1,0 +1,15 @@
+{
+  "dev": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-ebooksshoppingcart-dev-2dec3-authRole",
+      "UnauthRoleArn": "arn:aws:iam::112097210422:role/amplify-ebooksshoppingcart-dev-2dec3-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::112097210422:role/amplify-ebooksshoppingcart-dev-2dec3-authRole",
+      "Region": "ap-south-1",
+      "DeploymentBucketName": "amplify-ebooksshoppingcart-dev-2dec3-deployment",
+      "UnauthRoleName": "amplify-ebooksshoppingcart-dev-2dec3-unauthRole",
+      "StackName": "amplify-ebooksshoppingcart-dev-2dec3",
+      "StackId": "arn:aws:cloudformation:ap-south-1:112097210422:stack/amplify-ebooksshoppingcart-dev-2dec3/08c216a0-6572-11f0-a979-0ae8ef93e5ef",
+      "AmplifyAppId": "d2kqoxyso8shrm"
+    }
+  }
+}
