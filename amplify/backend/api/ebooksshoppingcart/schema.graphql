@@ -88,5 +88,5 @@ type CommentTest4 @model {
   content: String!
   testAttribute: String!
   testAttribute2: String!
-  testAttribute2: String!
+  testAttribute3: String!
 }
