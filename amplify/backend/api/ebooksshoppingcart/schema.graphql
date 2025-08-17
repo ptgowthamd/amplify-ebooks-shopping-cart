@@ -42,3 +42,22 @@ type CommentTest @model {
   testAttribute: String!
   testAttribute2: String!
 }
+
+type BlogTest2 @model {
+  id: ID!
+  name: String!
+  posts: [PostTest2] @hasMany
+}
+
+type PostTest2 @model {
+  id: ID!
+  title: String!
+  blog: BlogTest2 @belongsTo
+  comments: [CommentTest2] @hasMany
+}
+
+type CommentTest2 @model {
+  id: ID!
+  post: PostTest2 @belongsTo
+  content: String!
+}
