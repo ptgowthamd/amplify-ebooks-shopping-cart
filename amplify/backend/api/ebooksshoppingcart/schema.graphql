@@ -21,3 +21,23 @@ type Comment @model {
   content: String!
   testAttribute: String!
 }
+
+type BlogTest @model {
+  id: ID!
+  name: String!
+  posts: [Post] @hasMany
+}
+
+type PostTest @model {
+  id: ID!
+  title: String!
+  blog: Blog @belongsTo
+  comments: [Comment] @hasMany
+}
+
+type CommentTest @model {
+  id: ID!
+  post: Post @belongsTo
+  content: String!
+  testAttribute: String!
+}
