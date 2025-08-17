@@ -40,4 +40,5 @@ type CommentTest @model {
   post: PostTest @belongsTo
   content: String!
   testAttribute: String!
+  testAttribute2: String!
 }
