@@ -31,7 +31,7 @@ type BlogTest @model {
 type PostTest @model {
   id: ID!
   title: String!
-  blog: Blog @belongsTo
+  blog: BlogTest @belongsTo
   comments: [CommentTest] @hasMany
 }
 
