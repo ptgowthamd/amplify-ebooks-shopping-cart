@@ -18,20 +18,17 @@ frontend:
     paths:
       - node_modules/**/*
 
-# --- Backend: dynamic commit-aware deploy (function/api/full) ---
+# --- Backend: headless pull + dynamic commit-aware deploy (function/api/full) ---
 backend:
   phases:
     preBuild:
       commands:
-        # If your build image already patches Amplify CLI to v14, you can skip installing it again.
-        # - 'npm i -g @aws-amplify/cli@14'
-
         # Ensure enough history for diffs (esp. shallow clones)
         - "git fetch --no-tags --prune origin \"$AWS_BRANCH\" --deepen=1000 || true"
 
     build:
       commands:
-        # Write the whole backend logic into a script to avoid YAML command quoting issues
+        # Write the whole backend logic into a script to avoid YAML quoting issues
         - |
           cat > run-backend.sh <<'SCRIPT'
           set -euo pipefail
@@ -44,11 +41,35 @@ backend:
           fi
           echo "Amplify AppId: ${AMPLIFY_APP_ID}"
 
+          # --- Resolve backend environment name ---
+          # 1) Use AMPLIFY_ENV if you set it in Console env vars; otherwise
+          # 2) take the first key in team-provider-info.json; otherwise dev
+          if [ -n "${AMPLIFY_ENV:-}" ]; then
+            ENV_NAME="$AMPLIFY_ENV"
+          elif [ -f amplify/team-provider-info.json ]; then
+            ENV_NAME=$(node -e "console.log(Object.keys(require('./amplify/team-provider-info.json'))[0]||'')" 2>/dev/null || true)
+            ENV_NAME="${ENV_NAME:-dev}"
+          else
+            ENV_NAME="dev"
+          fi
+          echo "Amplify env: ${ENV_NAME}"
+
           # --- Ensure full history if the repo is shallow ---
           if git rev-parse --is-shallow-repository >/dev/null 2>&1 && git rev-parse --is-shallow-repository | grep -q true; then
             git fetch --unshallow --no-tags --prune origin "$AWS_BRANCH" || true
           fi
 
+          # --- Headless pull to hydrate local amplify/ state (creates amplify-meta.json & local-env-info) ---
+          # This avoids the "local-env-info.json / amplify-meta.json does not exist" errors during category pushes.
+          # Headless flags documented in Amplify CLI "Headless mode" docs.
+          amplify pull \
+            --yes \
+            --appId "$AMPLIFY_APP_ID" \
+            --envName "$ENV_NAME" \
+            --amplify "{\"appId\":\"$AMPLIFY_APP_ID\",\"envName\":\"$ENV_NAME\"}" \
+            --providers "{\"awscloudformation\":{\"configLevel\":\"project\",\"useProfile\":false,\"region\":\"${AWS_REGION:-us-east-1}\"}}" \
+            --frontend "{\"frontend\":\"javascript\",\"framework\":\"none\",\"config\":{}}" 
+          
           # --- Current commit from Amplify env (fallback to git) ---
           CURR_COMMIT="${AWS_COMMIT_ID:-$(git rev-parse HEAD)}"
           echo "Current commit: $CURR_COMMIT"
@@ -90,7 +111,6 @@ backend:
           # --- Choose the narrowest push command (function vs api vs full) ---
           FUNCTION_CHANGED=0
           API_CHANGED=0
-
           grep -q '^amplify/backend/function/' /tmp/changed.txt && FUNCTION_CHANGED=1
           grep -Eq '^amplify/backend/api/|^graphql/|schema\.graphql$' /tmp/changed.txt && API_CHANGED=1
 
