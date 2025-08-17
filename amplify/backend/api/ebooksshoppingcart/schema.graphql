@@ -25,19 +25,19 @@ type Comment @model {
 type BlogTest @model {
   id: ID!
   name: String!
-  posts: [Post] @hasMany
+  posts: [PostTest] @hasMany
 }
 
 type PostTest @model {
   id: ID!
   title: String!
   blog: Blog @belongsTo
-  comments: [Comment] @hasMany
+  comments: [CommentTest] @hasMany
 }
 
 type CommentTest @model {
   id: ID!
-  post: Post @belongsTo
+  post: PostTest @belongsTo
   content: String!
   testAttribute: String!
 }
