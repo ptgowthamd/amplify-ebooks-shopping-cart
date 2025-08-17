@@ -80,4 +80,5 @@ type CommentTest3 @model {
   id: ID!
   post: PostTest3 @belongsTo
   content: String!
+  testAttribute: String!
 }
