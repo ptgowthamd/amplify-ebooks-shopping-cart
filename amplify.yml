@@ -5,7 +5,7 @@ frontend:
   phases:
     preBuild:
       commands:
-        - echo "Backend-focused branch: skipping real frontend build"
+        - 'echo "Backend-focused branch: skipping real frontend build"'
     build:
       commands:
         - mkdir -p dist
@@ -27,7 +27,7 @@ backend:
         # - 'npm i -g @aws-amplify/cli@14'
 
         # Ensure enough history for diffs (esp. shallow clones)
-        - 'git fetch --no-tags --prune origin "$AWS_BRANCH" --deepen=1000 || true'
+        - "git fetch --no-tags --prune origin \"$AWS_BRANCH\" --deepen=1000 || true"
 
     build:
       commands:
@@ -107,8 +107,8 @@ backend:
           echo "Selected deploy command: $PUSH_CMD"
           $PUSH_CMD
           SCRIPT
-        - 'chmod +x run-backend.sh'
-        - './run-backend.sh'
+        - chmod +x run-backend.sh
+        - ./run-backend.sh
 
   cache:
     paths:
