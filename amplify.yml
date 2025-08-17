@@ -3,12 +3,16 @@ frontend:
   phases:
     preBuild:
       commands:
-        - "git fetch --no-tags --prune origin \"$AWS_BRANCH\" --deepen=1000 || true"
-        - "chmod +x scripts/run-backend.sh"
+        - git fetch --no-tags --prune origin "$AWS_BRANCH" --deepen=1000 || true
+        - chmod +x scripts/run-backend.sh
+        # 👇 Validate GraphQL & StackMapping early (fail fast)
+        - amplify api gql-compile
+        # (Optional) print a tiny summary of stacks & resolvers being mapped
+        - node -e "try{const t=require('./amplify/backend/api/*/transform.conf.json');const m=t.StackMapping||{};const g={};Object.values(m).forEach(s=>g[s]=(g[s]||0)+1);console.log('StackMapping summary:',g)}catch(e){console.log('No transform.conf.json yet')}"
     build:
       commands:
-        - "scripts/run-backend.sh"
-        - "mkdir -p dist && printf '<!doctype html><title>Backend-only</title><h1>OK</h1>' > dist/index.html"
+        - scripts/run-backend.sh
+        - mkdir -p dist && printf '<!doctype html><title>Backend-only</title><h1>OK</h1>' > dist/index.html
   artifacts:
     baseDirectory: dist
     files: ['**/*']

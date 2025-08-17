@@ -1,26 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*"; }
 
 # -------- Resolve Amplify App ID --------
-if [[ -n "${APP_ID:-}" ]]; then
-  AMPLIFY_APP_ID="$APP_ID"
-else
-  AMPLIFY_APP_ID="$(awk -F'"' '/AmplifyAppId/ {print $4; exit}' amplify/team-provider-info.json 2>/dev/null || true)"
-fi
+if [[ -n "${APP_ID:-}" ]]; then AMPLIFY_APP_ID="$APP_ID"
+else AMPLIFY_APP_ID="$(awk -F'"' '/AmplifyAppId/ {print $4; exit}' amplify/team-provider-info.json 2>/dev/null || true)"; fi
 [[ -z "${AMPLIFY_APP_ID:-}" ]] && { log "ERROR: missing APP_ID / AmplifyAppId"; exit 1; }
 log "Amplify AppId: $AMPLIFY_APP_ID"
 
 # -------- Resolve backend env name --------
-if [[ -n "${AMPLIFY_ENV:-}" ]]; then
-  ENV_NAME="$AMPLIFY_ENV"
+if [[ -n "${AMPLIFY_ENV:-}" ]]; then ENV_NAME="$AMPLIFY_ENV"
 elif [[ -f amplify/team-provider-info.json ]]; then
   ENV_NAME="$(node -e "try{const t=require('./amplify/team-provider-info.json');console.log(Object.keys(t)[0]||'')}catch(e){process.exit(0)}" 2>/dev/null || true)"
   ENV_NAME="${ENV_NAME:-dev}"
-else
-  ENV_NAME="dev"
-fi
+else ENV_NAME="dev"; fi
 log "Amplify env: $ENV_NAME"
 
 # -------- Ensure full history if shallow --------
@@ -48,77 +41,63 @@ git cat-file -e "$PREV_DEPLOY_COMMIT^{commit}" 2>/dev/null || git fetch origin "
 git diff --name-only "$PREV_DEPLOY_COMMIT" "$CURR_COMMIT" > /tmp/changed.txt || true
 log "Changed files since last deployment:"; cat /tmp/changed.txt || true
 
-# Nothing in backend? bail
+# Bail if no backend changes
 grep -q '^amplify/backend/' /tmp/changed.txt || { log "No backend changes detected. Skipping."; exit 0; }
 
-# -------- Detect categories changed (API = only backend/api paths) --------
+# -------- Detect categories changed --------
 FUNCTION_CHANGED=0
 API_CHANGED=0
+TRANSFORM_CHANGED=0
+
 grep -q '^amplify/backend/function/' /tmp/changed.txt && FUNCTION_CHANGED=1
 grep -q '^amplify/backend/api/' /tmp/changed.txt && API_CHANGED=1
+grep -q '^amplify/backend/api/.*/transform\.conf\.json$' /tmp/changed.txt && { TRANSFORM_CHANGED=1; API_CHANGED=1; }
 
-# Both → full helper path
 if [[ "$FUNCTION_CHANGED" -eq 1 && "$API_CHANGED" -eq 1 ]]; then
   log "Functions AND API changed → amplifyPush --simple (pull + full push)"
   amplifyPush --simple
   exit 0
 fi
 
-# -------- Build lists of items to protect if we must pull ----------
+# -------- Pull local state if needed (your existing logic) --------
 NEED_PULL=0
 [[ ! -f amplify/backend/amplify-meta.json ]] && NEED_PULL=1
 [[ ! -f amplify/.config/local-env-info.json ]] && NEED_PULL=1
 
-# Gather changed function dirs and schema paths
+backup_path(){ local p="$1"; [[ -e "$p" ]] || return 0; local key="/tmp/bak_$(echo "$p" | tr '/.' '__').tar"; log "Backing up $p -> $key"; tar -C "$(dirname "$p")" -cf "$key" "$(basename "$p")"; }
+restore_path(){ local p="$1"; local key="/tmp/bak_$(echo "$p" | tr '/.' '__').tar"; [[ -f "$key" ]] || return 0; log "Restoring $p from $key"; mkdir -p "$(dirname "$p")"; tar -xf "$key" -C "$(dirname "$p")"; }
+
 mapfile -t FUNC_DIRS < <(grep -oE '^amplify/backend/function/[^/]+/' /tmp/changed.txt | sort -u || true)
-# Schema files can be single-file or split-files:
 mapfile -t SCHEMA_FILES_SINGLE < <(grep -oE '^amplify/backend/api/[^/]+/schema\.graphql$' /tmp/changed.txt | sort -u || true)
 mapfile -t SCHEMA_FILES_SPLIT  < <(grep -oE '^amplify/backend/api/[^/]+/schema/.*\.graphql$' /tmp/changed.txt | sort -u || true)
 
-backup_path() {
-  local p="$1"
-  [[ -e "$p" ]] || return 0
-  local key="/tmp/bak_$(echo "$p" | tr '/.' '__').tar"
-  log "Backing up $p -> $key"
-  tar -C "$(dirname "$p")" -cf "$key" "$(basename "$p")"
-}
-restore_path() {
-  local p="$1"; local key="/tmp/bak_$(echo "$p" | tr '/.' '__').tar"
-  [[ -f "$key" ]] || return 0
-  log "Restoring $p from $key"
-  mkdir -p "$(dirname "$p")"
-  tar -xf "$key" -C "$(dirname "$p")"
-}
-
 if [[ "$NEED_PULL" -eq 1 ]]; then
-  # Back up changed function dirs and schema (single & split)
   for d in "${FUNC_DIRS[@]:-}"; do backup_path "$d"; done
   for f in "${SCHEMA_FILES_SINGLE[@]:-}"; do backup_path "$f"; done
-  # For split schema, back up the whole schema/ folder per API once
   if [[ ${#SCHEMA_FILES_SPLIT[@]} -gt 0 ]]; then
     mapfile -t SCHEMA_DIRS < <(printf '%s\n' "${SCHEMA_FILES_SPLIT[@]}" | sed -E 's#/schema/.*$#/schema/#' | sort -u)
     for d in "${SCHEMA_DIRS[@]:-}"; do backup_path "$d"; done
   fi
-
   log "Headless pull to hydrate local amplify/ state..."
   amplify pull --yes --appId "$AMPLIFY_APP_ID" --envName "$ENV_NAME"
-
-  # Restore protected content over whatever the pull wrote
   for d in "${FUNC_DIRS[@]:-}"; do restore_path "$d"; done
   for f in "${SCHEMA_FILES_SINGLE[@]:-}"; do restore_path "$f"; done
-  if [[ ${#SCHEMA_FILES_SPLIT[@]} -gt 0 ]]; then
-    for d in "${SCHEMA_DIRS[@]:-}"; do restore_path "$d"; done
-  fi
+  if [[ ${#SCHEMA_DIRS[@]:-} -gt 0 ]]; then for d in "${SCHEMA_DIRS[@]}"; do restore_path "$d"; done; fi
 else
   log "Local amplify state present; skipping pull."
 fi
 
-# -------- Category-scoped push --------
+# -------- Category-scoped push with a compile pre-step --------
 if [[ "$FUNCTION_CHANGED" -eq 1 ]]; then
   log "Only functions changed → amplify function push"
   amplify function push --yes
 elif [[ "$API_CHANGED" -eq 1 ]]; then
-  log "Only API changed → amplify api push"
+  if [[ "$TRANSFORM_CHANGED" -eq 1 ]]; then
+    log "transform.conf.json changed → validate StackMapping with gql-compile"
+  else
+    log "API changed → compiling before API push"
+  fi
+  amplify api gql-compile
   amplify api push --yes
 else
   log "Other backend changes → full amplify push"
