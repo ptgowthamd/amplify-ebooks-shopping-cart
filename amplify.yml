@@ -1,19 +1,39 @@
 version: 1
 
+# ---- Minimal stub so Amplify Hosting doesn't error on "Missing frontend definition" ----
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - echo "Backend-focused branch: skipping real frontend build"
+    build:
+      commands:
+        - mkdir -p dist
+        - echo '<!doctype html><title>Backend-only</title><h1>Backend-only branch</h1>' > dist/index.html
+  artifacts:
+    baseDirectory: dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
+
+# ---- Backend: dynamic, commit-aware deploy ----
 backend:
   phases:
     preBuild:
       commands:
-        # Pin CLI (optional if your image already has it)
-        - npm i -g @aws-amplify/cli@14
-        # Ensure we have enough history to diff against last deployed commit
-        - git fetch --no-tags --prune origin $AWS_BRANCH --depth=1000 || true
+        # If your image already patches the CLI to v14, you can skip installing it again.
+        # - npm i -g @aws-amplify/cli@14
+
+        # Ensure we have enough history to diff against the previous deployed commit
+        - git fetch --no-tags --prune origin $AWS_BRANCH --deepen=1000 || true
 
     build:
       commands:
         - set -euo pipefail
 
-        # Resolve Amplify App ID (prefer APP_ID env; fallback to team-provider-info.json)
+        # --- Resolve Amplify App ID (prefer APP_ID env; fallback to team-provider-info.json) ---
         - |
           if [ -n "${APP_ID:-}" ]; then
             AMPLIFY_APP_ID="$APP_ID"
@@ -22,71 +42,77 @@ backend:
           fi
           echo "Amplify AppId: ${AMPLIFY_APP_ID}"
 
-        # Find previous successful deploy commit for this branch using Amplify ListJobs
+        # --- Ensure full history if the repo is shallow ---
+        - |
+          if git rev-parse --is-shallow-repository >/dev/null 2>&1 && \
+             git rev-parse --is-shallow-repository | grep -q true; then
+            git fetch --unshallow --no-tags --prune origin "$AWS_BRANCH" || true
+          fi
+
+        # --- Current commit from Amplify env (fallback to git) ---
         - |
           CURR_COMMIT="${AWS_COMMIT_ID:-$(git rev-parse HEAD)}"
           echo "Current commit: $CURR_COMMIT"
 
+        # --- Find the most recent SUCCEED job's commit on this branch (exclude current) ---
+        - |
           PREV_DEPLOY_COMMIT=$(
             aws amplify list-jobs \
               --app-id "$AMPLIFY_APP_ID" \
               --branch-name "$AWS_BRANCH" \
-              --max-items 50 \
-              --query "jobSummaries[?status=='SUCCEED' && commitId!='${CURR_COMMIT}']|[0].commitId" \
-              --output text 2>/dev/null || true
+              --no-paginate \
+              --query "reverse(sort_by(jobSummaries[?status=='SUCCEED' && commitId!='\`${CURR_COMMIT}\`'], &startTime))[0].commitId" \
+              --output text 2>/dev/null \
+            | tr -d '\r' \
+            | grep -E '^[0-9a-f]{7,}$' \
+            | head -n1
           )
 
-          if [ -z "$PREV_DEPLOY_COMMIT" ] || [ "$PREV_DEPLOY_COMMIT" = "None" ]; then
-            # First deploy or no prior success found → fall back to previous commit (or repo root)
-            PREV_DEPLOY_COMMIT=$(git rev-parse HEAD^ || git rev-list --max-parents=0 HEAD)
+          # Fallbacks if nothing came back (first deploy or no prior success)
+          if [ -z "$PREV_DEPLOY_COMMIT" ]; then
+            PREV_DEPLOY_COMMIT=$(git rev-parse HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
           fi
           echo "Previous deployed commit: $PREV_DEPLOY_COMMIT"
 
-          # Make sure that commit exists locally (shallow clones may miss it)
-          git cat-file -e "$PREV_DEPLOY_COMMIT^{commit}" || git fetch origin "$PREV_DEPLOY_COMMIT" --depth=1
+          # Make sure we have that commit locally
+          git cat-file -e "$PREV_DEPLOY_COMMIT^{commit}" 2>/dev/null || \
+            git fetch origin "$AWS_BRANCH" --deepen=1000
 
-        # Compute changed files since last deployment
+        # --- Compute changes since the previous successful deployment ---
         - |
           git diff --name-only "$PREV_DEPLOY_COMMIT" "$CURR_COMMIT" > /tmp/changed.txt || true
-          echo "Changed files since last deployment:" && cat /tmp/changed.txt || true
+          echo "Changed files since last deployment:"
+          cat /tmp/changed.txt || true
 
-        # If no backend paths changed, skip pushing
+        # --- If no backend paths changed, skip pushing altogether ---
         - |
           if ! grep -q '^amplify/backend/' /tmp/changed.txt; then
             echo "No backend changes since last deployment. Skipping amplify push."
             exit 0
           fi
 
-        # Choose the narrowest push command
+        # --- Choose the narrowest push command (function vs api vs full) ---
         - |
-          PUSH_CMD="amplify push --yes"
-          if grep -q '^amplify/backend/function/' /tmp/changed.txt; then
+          FUNCTION_CHANGED=0
+          API_CHANGED=0
+
+          grep -q '^amplify/backend/function/' /tmp/changed.txt && FUNCTION_CHANGED=1
+          grep -Eq '^amplify/backend/api/|^graphql/|schema\.graphql$' /tmp/changed.txt && API_CHANGED=1
+
+          if [ "$FUNCTION_CHANGED" -eq 1 ] && [ "$API_CHANGED" -eq 1 ]; then
+            PUSH_CMD="amplify push --yes"
+          elif [ "$FUNCTION_CHANGED" -eq 1 ]; then
             PUSH_CMD="amplify function push --yes"
-          elif grep -Eq '^amplify/backend/api/|^graphql/|schema\\.graphql$' /tmp/changed.txt; then
+          elif [ "$API_CHANGED" -eq 1 ]; then
             PUSH_CMD="amplify api push --yes"
+          else
+            PUSH_CMD="amplify push --yes"
           fi
+
           echo "Selected deploy command: $PUSH_CMD"
           $PUSH_CMD
 
   cache:
     paths:
       - ~/.npm/**/*
-      - node_modules/**/*
-
-# Minimal stub so Amplify Hosting doesn't error on "Missing frontend definition"
-frontend:
-  phases:
-    preBuild:
-      commands:
-        - echo "Skipping real frontend build for this branch"
-    build:
-      commands:
-        - mkdir -p noop-dist
-        - echo '<!doctype html><title>Backend-only</title><h1>Backend-only branch</h1>' > noop-dist/index.html
-  artifacts:
-    baseDirectory: noop-dist
-    files:
-      - '**/*'
-  cache:
-    paths:
       - node_modules/**/*
