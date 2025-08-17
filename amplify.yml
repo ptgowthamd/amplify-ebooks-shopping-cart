@@ -1,6 +1,6 @@
 version: 1
 
-# ---- Minimal stub so Amplify Hosting doesn't error on "Missing frontend definition" ----
+# --- Minimal stub so Amplify Hosting doesn't complain about missing frontend ---
 frontend:
   phases:
     preBuild:
@@ -9,7 +9,7 @@ frontend:
     build:
       commands:
         - mkdir -p dist
-        - echo '<!doctype html><title>Backend-only</title><h1>Backend-only branch</h1>' > dist/index.html
+        - 'echo "<!doctype html><title>Backend-only</title><h1>Backend-only branch</h1>" > dist/index.html'
   artifacts:
     baseDirectory: dist
     files:
@@ -18,50 +18,48 @@ frontend:
     paths:
       - node_modules/**/*
 
-# ---- Backend: dynamic, commit-aware deploy ----
+# --- Backend: dynamic commit-aware deploy (function/api/full) ---
 backend:
   phases:
     preBuild:
       commands:
-        # If your image already patches the CLI to v14, you can skip installing it again.
-        # - npm i -g @aws-amplify/cli@14
+        # If your build image already patches Amplify CLI to v14, you can skip installing it again.
+        # - 'npm i -g @aws-amplify/cli@14'
 
-        # Ensure we have enough history to diff against the previous deployed commit
-        - git fetch --no-tags --prune origin $AWS_BRANCH --deepen=1000 || true
+        # Ensure enough history for diffs (esp. shallow clones)
+        - 'git fetch --no-tags --prune origin "$AWS_BRANCH" --deepen=1000 || true'
 
     build:
       commands:
-        - set -euo pipefail
-
-        # --- Resolve Amplify App ID (prefer APP_ID env; fallback to team-provider-info.json) ---
+        # Write the whole backend logic into a script to avoid YAML command quoting issues
         - |
+          cat > run-backend.sh <<'SCRIPT'
+          set -euo pipefail
+
+          # --- Resolve Amplify App ID (prefer APP_ID env; fallback to team-provider-info.json) ---
           if [ -n "${APP_ID:-}" ]; then
             AMPLIFY_APP_ID="$APP_ID"
           else
-            AMPLIFY_APP_ID=$(awk -F'"' '/AmplifyAppId/ {print $4; exit}' amplify/team-provider-info.json || true)
+            AMPLIFY_APP_ID=$(awk -F'"' '/AmplifyAppId/ {print $4; exit}' amplify/team-provider-info.json 2>/dev/null || true)
           fi
           echo "Amplify AppId: ${AMPLIFY_APP_ID}"
 
-        # --- Ensure full history if the repo is shallow ---
-        - |
-          if git rev-parse --is-shallow-repository >/dev/null 2>&1 && \
-             git rev-parse --is-shallow-repository | grep -q true; then
+          # --- Ensure full history if the repo is shallow ---
+          if git rev-parse --is-shallow-repository >/dev/null 2>&1 && git rev-parse --is-shallow-repository | grep -q true; then
             git fetch --unshallow --no-tags --prune origin "$AWS_BRANCH" || true
           fi
 
-        # --- Current commit from Amplify env (fallback to git) ---
-        - |
+          # --- Current commit from Amplify env (fallback to git) ---
           CURR_COMMIT="${AWS_COMMIT_ID:-$(git rev-parse HEAD)}"
           echo "Current commit: $CURR_COMMIT"
 
-        # --- Find the most recent SUCCEED job's commit on this branch (exclude current) ---
-        - |
+          # --- Find the most recent SUCCEED job's commit on this branch (exclude current) ---
           PREV_DEPLOY_COMMIT=$(
             aws amplify list-jobs \
               --app-id "$AMPLIFY_APP_ID" \
               --branch-name "$AWS_BRANCH" \
               --no-paginate \
-              --query "reverse(sort_by(jobSummaries[?status=='SUCCEED' && commitId!='\`${CURR_COMMIT}\`'], &startTime))[0].commitId" \
+              --query "reverse(sort_by(jobSummaries[?status=='SUCCEED' && commitId!='\`$CURR_COMMIT\`'], &startTime))[0].commitId" \
               --output text 2>/dev/null \
             | tr -d '\r' \
             | grep -E '^[0-9a-f]{7,}$' \
@@ -78,21 +76,18 @@ backend:
           git cat-file -e "$PREV_DEPLOY_COMMIT^{commit}" 2>/dev/null || \
             git fetch origin "$AWS_BRANCH" --deepen=1000
 
-        # --- Compute changes since the previous successful deployment ---
-        - |
+          # --- Compute changes since the previous successful deployment ---
           git diff --name-only "$PREV_DEPLOY_COMMIT" "$CURR_COMMIT" > /tmp/changed.txt || true
           echo "Changed files since last deployment:"
           cat /tmp/changed.txt || true
 
-        # --- If no backend paths changed, skip pushing altogether ---
-        - |
+          # --- If no backend paths changed, skip pushing altogether ---
           if ! grep -q '^amplify/backend/' /tmp/changed.txt; then
             echo "No backend changes since last deployment. Skipping amplify push."
             exit 0
           fi
 
-        # --- Choose the narrowest push command (function vs api vs full) ---
-        - |
+          # --- Choose the narrowest push command (function vs api vs full) ---
           FUNCTION_CHANGED=0
           API_CHANGED=0
 
@@ -111,6 +106,9 @@ backend:
 
           echo "Selected deploy command: $PUSH_CMD"
           $PUSH_CMD
+          SCRIPT
+        - 'chmod +x run-backend.sh'
+        - './run-backend.sh'
 
   cache:
     paths:
