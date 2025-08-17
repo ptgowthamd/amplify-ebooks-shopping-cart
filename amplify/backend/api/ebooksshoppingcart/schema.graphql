@@ -82,3 +82,9 @@ type CommentTest3 @model {
   content: String!
   testAttribute: String!
 }
+
+type CommentTest4 @model {
+  id: ID!
+  content: String!
+  testAttribute: String!
+}
