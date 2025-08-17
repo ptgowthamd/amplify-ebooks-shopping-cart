@@ -8,6 +8,6 @@ exports.handler = async (event) => {
     console.log(`test logging from testFunction01`);
     return {
         statusCode: 200,
-        body: JSON.stringify('Hello from AWS Lambda!, test change3 new, may be this time this change is not ignored'),
+        body: JSON.stringify('Hello from AWS Lambda!, test change3 new, may be this time this change is not ignored. Try this time.'),
     };
 };
