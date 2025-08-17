@@ -1,26 +1,28 @@
 version: 1
+
 backend:
   phases:
     preBuild:
       commands:
+        # Pin CLI (optional if your image already has it)
         - npm i -g @aws-amplify/cli@14
-        # ensure enough history to find the previous deployed commit
+        # Ensure we have enough history to diff against last deployed commit
         - git fetch --no-tags --prune origin $AWS_BRANCH --depth=1000 || true
+
     build:
       commands:
         - set -euo pipefail
 
-        # --- Resolve Amplify App ID (from env var or team-provider-info.json) ---
+        # Resolve Amplify App ID (prefer APP_ID env; fallback to team-provider-info.json)
         - |
           if [ -n "${APP_ID:-}" ]; then
             AMPLIFY_APP_ID="$APP_ID"
           else
-            # fallback: parse from amplify/team-provider-info.json (Gen 1 projects)
             AMPLIFY_APP_ID=$(awk -F'"' '/AmplifyAppId/ {print $4; exit}' amplify/team-provider-info.json || true)
           fi
           echo "Amplify AppId: ${AMPLIFY_APP_ID}"
 
-        # --- Find the previous successful deploy commit on this branch ---
+        # Find previous successful deploy commit for this branch using Amplify ListJobs
         - |
           CURR_COMMIT="${AWS_COMMIT_ID:-$(git rev-parse HEAD)}"
           echo "Current commit: $CURR_COMMIT"
@@ -33,16 +35,17 @@ backend:
               --query "jobSummaries[?status=='SUCCEED' && commitId!='${CURR_COMMIT}']|[0].commitId" \
               --output text 2>/dev/null || true
           )
+
           if [ -z "$PREV_DEPLOY_COMMIT" ] || [ "$PREV_DEPLOY_COMMIT" = "None" ]; then
-            # first deploy or no prior success found: fall back to previous commit
+            # First deploy or no prior success found → fall back to previous commit (or repo root)
             PREV_DEPLOY_COMMIT=$(git rev-parse HEAD^ || git rev-list --max-parents=0 HEAD)
           fi
           echo "Previous deployed commit: $PREV_DEPLOY_COMMIT"
 
-          # make sure we have that commit locally (shallow clones may miss it)
+          # Make sure that commit exists locally (shallow clones may miss it)
           git cat-file -e "$PREV_DEPLOY_COMMIT^{commit}" || git fetch origin "$PREV_DEPLOY_COMMIT" --depth=1
 
-        # --- Compute changed backend files since last deployment ---
+        # Compute changed files since last deployment
         - |
           git diff --name-only "$PREV_DEPLOY_COMMIT" "$CURR_COMMIT" > /tmp/changed.txt || true
           echo "Changed files since last deployment:" && cat /tmp/changed.txt || true
@@ -50,7 +53,7 @@ backend:
         # If no backend paths changed, skip pushing
         - |
           if ! grep -q '^amplify/backend/' /tmp/changed.txt; then
-            echo "No backend changes since last deployment. Skipping push."
+            echo "No backend changes since last deployment. Skipping amplify push."
             exit 0
           fi
 
@@ -59,8 +62,31 @@ backend:
           PUSH_CMD="amplify push --yes"
           if grep -q '^amplify/backend/function/' /tmp/changed.txt; then
             PUSH_CMD="amplify function push --yes"
-          elif grep -Eq '^amplify/backend/api/|^graphql/|schema\.graphql$' /tmp/changed.txt; then
+          elif grep -Eq '^amplify/backend/api/|^graphql/|schema\\.graphql$' /tmp/changed.txt; then
             PUSH_CMD="amplify api push --yes"
           fi
           echo "Selected deploy command: $PUSH_CMD"
           $PUSH_CMD
+
+  cache:
+    paths:
+      - ~/.npm/**/*
+      - node_modules/**/*
+
+# Minimal stub so Amplify Hosting doesn't error on "Missing frontend definition"
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - echo "Skipping real frontend build for this branch"
+    build:
+      commands:
+        - mkdir -p noop-dist
+        - echo '<!doctype html><title>Backend-only</title><h1>Backend-only branch</h1>' > noop-dist/index.html
+  artifacts:
+    baseDirectory: noop-dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
