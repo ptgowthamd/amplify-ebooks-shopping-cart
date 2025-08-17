@@ -1,124 +1,14 @@
 version: 1
-
-# --- Minimal stub so Hosting doesn't complain about missing frontend ---
 frontend:
   phases:
     preBuild:
       commands:
-        - 'echo "Backend-focused branch: skipping real frontend build"'
+        - "git fetch --no-tags --prune origin \"$AWS_BRANCH\" --deepen=1000 || true"
+        - "chmod +x scripts/run-backend.sh"
     build:
       commands:
-        - mkdir -p dist
-        - 'printf "<!doctype html><title>Backend-only</title><h1>Backend-only branch</h1>" > dist/index.html'
+        - "scripts/run-backend.sh"
+        - "mkdir -p dist && printf '<!doctype html><title>Backend-only</title><h1>OK</h1>' > dist/index.html"
   artifacts:
     baseDirectory: dist
-    files:
-      - '**/*'
-  cache:
-    paths:
-      - node_modules/**/*
-
-# --- Backend: diff -> choose path -> pull (if needed) -> push ---
-backend:
-  phases:
-    preBuild:
-      commands:
-        # Make sure we can diff more than one commit (esp. shallow clones)
-        - "git fetch --no-tags --prune origin \"$AWS_BRANCH\" --deepen=1000 || true"
-
-    build:
-      commands:
-        - |
-          cat > run-backend.sh <<'SCRIPT'
-          set -euo pipefail
-
-          # Resolve Amplify App ID (env var preferred)
-          if [ -n "${APP_ID:-}" ]; then
-            AMPLIFY_APP_ID="$APP_ID"
-          else
-            AMPLIFY_APP_ID=$(awk -F'"' '/AmplifyAppId/ {print $4; exit}' amplify/team-provider-info.json 2>/dev/null || true)
-          fi
-          if [ -z "${AMPLIFY_APP_ID:-}" ]; then
-            echo "ERROR: Amplify AppId not found. Set APP_ID in env vars or keep AmplifyAppId in team-provider-info.json"
-            exit 1
-          fi
-          echo "Amplify AppId: $AMPLIFY_APP_ID"
-
-          # Resolve backend env name
-          if [ -n "${AMPLIFY_ENV:-}" ]; then
-            ENV_NAME="$AMPLIFY_ENV"
-          elif [ -f amplify/team-provider-info.json ]; then
-            ENV_NAME=$(node -e "const t=require('./amplify/team-provider-info.json');console.log(Object.keys(t)[0]||'')" 2>/dev/null || true)
-            ENV_NAME="${ENV_NAME:-dev}"
-          else
-            ENV_NAME="dev"
-          fi
-          echo "Amplify env: $ENV_NAME"
-
-          # Ensure full history if shallow
-          if git rev-parse --is-shallow-repository >/dev/null 2>&1 && git rev-parse --is-shallow-repository | grep -q true; then
-            git fetch --unshallow --no-tags --prune origin "$AWS_BRANCH" || true
-          fi
-
-          # Find previous successful deploy commit on this branch
-          CURR_COMMIT="${AWS_COMMIT_ID:-$(git rev-parse HEAD)}"
-          echo "Current commit: $CURR_COMMIT"
-          PREV_DEPLOY_COMMIT=$(
-            aws amplify list-jobs \
-              --app-id "$AMPLIFY_APP_ID" \
-              --branch-name "$AWS_BRANCH" \
-              --no-paginate \
-              --query "reverse(sort_by(jobSummaries[?status=='SUCCEED' && commitId!='\`$CURR_COMMIT\`'], &startTime))[0].commitId" \
-              --output text 2>/dev/null | tr -d '\r' | grep -E '^[0-9a-f]{7,}$' | head -n1
-          )
-          if [ -z "$PREV_DEPLOY_COMMIT" ]; then
-            PREV_DEPLOY_COMMIT=$(git rev-parse HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
-          fi
-          echo "Previous deployed commit: $PREV_DEPLOY_COMMIT"
-          git cat-file -e "$PREV_DEPLOY_COMMIT^{commit}" 2>/dev/null || git fetch origin "$AWS_BRANCH" --deepen=1000
-
-          # Compute changed files since previous deploy
-          git diff --name-only "$PREV_DEPLOY_COMMIT" "$CURR_COMMIT" > /tmp/changed.txt || true
-          echo "Changed files since last deployment:"; cat /tmp/changed.txt || true
-
-          # If nothing in backend changed, skip
-          if ! grep -q '^amplify/backend/' /tmp/changed.txt; then
-            echo "No backend changes. Skipping backend push."
-            exit 0
-          fi
-
-          # Detect category deltas
-          FUNCTION_CHANGED=0
-          API_CHANGED=0
-          grep -q '^amplify/backend/function/' /tmp/changed.txt && FUNCTION_CHANGED=1
-          grep -Eq '^amplify/backend/api/|^graphql/|schema\.graphql$' /tmp/changed.txt && API_CHANGED=1
-
-          if [ "$FUNCTION_CHANGED" -eq 1 ] && [ "$API_CHANGED" -eq 1 ]; then
-            echo "Functions AND API changed → using amplifyPush --simple (pull + full push)."
-            amplifyPush --simple
-            exit 0
-          fi
-
-          echo "Hydrating local Amplify state with minimal headless pull..."
-          # IMPORTANT: no --providers JSON here (Console role supplies creds/region)
-          # This is the pattern shown in AWS docs for Console builds.
-          amplify pull --yes --appId "$AMPLIFY_APP_ID" --envName "$ENV_NAME"
-
-          if [ "$FUNCTION_CHANGED" -eq 1 ]; then
-            echo "Only functions changed → amplify function push"
-            amplify function push --yes
-          elif [ "$API_CHANGED" -eq 1 ]; then
-            echo "Only API changed → amplify api push"
-            amplify api push --yes
-          else
-            echo "Backend changed (other categories) → full push"
-            amplify push --yes
-          fi
-          SCRIPT
-        - chmod +x run-backend.sh
-        - ./run-backend.sh
-
-  cache:
-    paths:
-      - ~/.npm/**/*
-      - node_modules/**/*
+    files: ['**/*']
