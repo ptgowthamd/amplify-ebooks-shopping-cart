@@ -65,7 +65,6 @@ if [[ "$FUNCTION_CHANGED" -eq 1 && "$API_CHANGED" -eq 1 ]]; then
   if command -v amplifyPush >/dev/null 2>&1; then
     amplifyPush --simple
   else
-    # Fallback if helper isn't present
     amplify pull --yes --appId "$AMPLIFY_APP_ID" --envName "$ENV_NAME"
     amplify push --yes
   fi
@@ -104,6 +103,9 @@ restore_path() {
   tar -xf "$key" -C "$(dirname "$p")"
 }
 
+# Protect backend-config.json so pull can't drop your new resources.
+CONFIG_FILES=( "amplify/backend/backend-config.json" )
+
 # Build split-schema dir list only when needed
 if (( ${#SCHEMA_FILES_SPLIT[@]} > 0 )); then
   mapfile -t SCHEMA_DIRS < <(
@@ -112,7 +114,7 @@ if (( ${#SCHEMA_FILES_SPLIT[@]} > 0 )); then
 fi
 
 if [[ "$NEED_PULL" -eq 1 ]]; then
-  # Back up changed function dirs and schema (single & split)
+  # Back up changed function dirs, schema, and backend-config.json
   if (( ${#FUNC_DIRS[@]} > 0 )); then
     for d in "${FUNC_DIRS[@]}"; do backup_path "$d"; done
   fi
@@ -122,6 +124,7 @@ if [[ "$NEED_PULL" -eq 1 ]]; then
   if (( ${#SCHEMA_DIRS[@]} > 0 )); then
     for d in "${SCHEMA_DIRS[@]}"; do backup_path "$d"; done
   fi
+  for cf in "${CONFIG_FILES[@]}"; do backup_path "$cf"; done
 
   log "Headless pull to hydrate local amplify/ state..."
   amplify pull --yes --appId "$AMPLIFY_APP_ID" --envName "$ENV_NAME"
@@ -136,8 +139,33 @@ if [[ "$NEED_PULL" -eq 1 ]]; then
   if (( ${#SCHEMA_DIRS[@]} > 0 )); then
     for d in "${SCHEMA_DIRS[@]}"; do restore_path "$d"; done
   fi
+  for cf in "${CONFIG_FILES[@]}"; do restore_path "$cf"; done
 else
   log "Local amplify state present; skipping pull."
+fi
+
+# -------- Sanity log & guard: registered functions vs folders --------
+log "Functions registered in backend-config.json:"
+node -e 'const fs=require("fs");const p="amplify/backend/backend-config.json";
+try{const j=JSON.parse(fs.readFileSync(p,"utf8"));console.log(Object.keys(j.function||{}).join(", ")||"(none)");}catch(e){console.log("(none)");}' || true
+
+# Fail fast if a function dir exists but is NOT registered (prevents confusing "No changes detected")
+mapfile -t FUNC_DIRS_ON_DISK < <(ls -1 amplify/backend/function 2>/dev/null | sort -u || true)
+mapfile -t FUNC_KEYS_IN_CONFIG < <(node -e 'const fs=require("fs");const p="amplify/backend/backend-config.json";
+try{const j=JSON.parse(fs.readFileSync(p,"utf8"));console.log(Object.keys(j.function||{}).join("\n"));}catch(e){}' | sort -u || true)
+
+if (( ${#FUNC_DIRS_ON_DISK[@]} > 0 )); then
+  UNREGISTERED=$(
+    comm -23 \
+      <(printf "%s\n" "${FUNC_DIRS_ON_DISK[@]}" | sort) \
+      <(printf "%s\n" "${FUNC_KEYS_IN_CONFIG[@]}" | sort) || true
+  )
+  if [[ -n "${UNREGISTERED:-}" ]]; then
+    log "ERROR: Found function directory/ies not registered in backend-config.json:"
+    printf '%s\n' "$UNREGISTERED"
+    log "Run 'amplify add function' (or commit backend-config.json) to register them."
+    exit 1
+  fi
 fi
 
 # -------- Category-scoped push with a compile pre-step --------
@@ -147,7 +175,7 @@ if [[ "$FUNCTION_CHANGED" -eq 1 ]]; then
 
 elif [[ "$API_CHANGED" -eq 1 ]]; then
   if [[ "$TRANSFORM_CHANGED" -eq 1 ]]; then
-    log "transform.conf.json changed → validating StackMapping with gql-compile"
+    log "transform.conf.json changed → compiling & pushing GraphQL API"
   else
     log "API changed → compiling before API push"
   fi
