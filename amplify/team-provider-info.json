@@ -13,9 +13,21 @@
     },
     "categories": {
       "function": {
-        "testFunction01": {},
-        "testFunctonNew": {},
-        "testFunctionNew2": {}
+        "testFunction01": {
+          "deploymentBucketName": "amplify-ebooksshoppingcart-dev-2dec3-deployment",
+          "s3Key": "amplify-builds/testFunction01-554e7047533447777a71-build.zip"
+        },
+        "testFunctonNew": {
+          "deploymentBucketName": "amplify-ebooksshoppingcart-dev-2dec3-deployment",
+          "s3Key": "amplify-builds/testFunctonNew-54334d55376a48665879-build.zip"
+        },
+        "testFunctionNew2": {
+          "deploymentBucketName": "amplify-ebooksshoppingcart-dev-2dec3-deployment",
+          "s3Key": "amplify-builds/testFunctionNew2-483463326274422f7747-build.zip"
+        }
+      },
+      "api": {
+        "ebooksshoppingcart": {}
       }
     }
   }

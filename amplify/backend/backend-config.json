@@ -33,5 +33,55 @@
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     }
+  },
+  "parameters": {
+    "AMPLIFY_function_testFunction01_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "testFunction01"
+        }
+      ]
+    },
+    "AMPLIFY_function_testFunction01_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "testFunction01"
+        }
+      ]
+    },
+    "AMPLIFY_function_testFunctionNew2_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "testFunctionNew2"
+        }
+      ]
+    },
+    "AMPLIFY_function_testFunctionNew2_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "testFunctionNew2"
+        }
+      ]
+    },
+    "AMPLIFY_function_testFunctonNew_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "testFunctonNew"
+        }
+      ]
+    },
+    "AMPLIFY_function_testFunctonNew_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "testFunctonNew"
+        }
+      ]
+    }
   }
 }
