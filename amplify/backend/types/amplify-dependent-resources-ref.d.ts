@@ -21,6 +21,12 @@ export type AmplifyDependentResourcesAttributes = {
       "Name": "string",
       "Region": "string"
     },
+    "testFunctionNew3": {
+      "Arn": "string",
+      "LambdaExecutionRole": "string",
+      "Name": "string",
+      "Region": "string"
+    },
     "testFunctonNew": {
       "Arn": "string",
       "LambdaExecutionRole": "string",
