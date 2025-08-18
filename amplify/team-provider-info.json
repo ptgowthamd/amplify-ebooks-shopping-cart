@@ -14,7 +14,8 @@
     "categories": {
       "function": {
         "testFunction01": {},
-        "testFunctonNew": {}
+        "testFunctonNew": {},
+        "testFunctionNew2": {}
       }
     }
   }
