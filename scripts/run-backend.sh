@@ -219,8 +219,9 @@ if [[ "$FUNCTION_CHANGED" -eq 1 ]]; then
   #   amplify push --yes
   # else
   #   log "Only functions changed → amplify function push"
-  # amplify function push --yes
-  amplify push function testFunctionNew2 --yes
+  log "Only functions changed → amplify function push"
+  amplify function push --yes
+  # amplify push function testFunctionNew2 --yes
 
 elif [[ "$API_CHANGED" -eq 1 ]]; then
   if [[ "$TRANSFORM_CHANGED" -eq 1 ]]; then
