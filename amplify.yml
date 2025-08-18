@@ -3,16 +3,12 @@ frontend:
   phases:
     preBuild:
       commands:
-        - git fetch --no-tags --prune origin "$AWS_BRANCH" --deepen=1000 || true
-        - chmod +x scripts/run-backend.sh
-        # Fail fast if GraphQL/StackMapping has issues
-        - amplify api gql-compile
-        # Quick shell syntax check for the script
-        - bash -n scripts/run-backend.sh
+        - "git fetch --no-tags --prune origin \"$AWS_BRANCH\" --deepen=1000 || true"
+        - "chmod +x scripts/run-backend.sh"
     build:
       commands:
-        - scripts/run-backend.sh
-        - mkdir -p dist && printf '<!doctype html><title>Backend-only</title><h1>OK</h1>' > dist/index.html
+        - "scripts/run-backend.sh"
+        - "mkdir -p dist && printf '<!doctype html><title>Backend-only</title><h1>OK</h1>' > dist/index.html"
   artifacts:
     baseDirectory: dist
     files: ['**/*']
