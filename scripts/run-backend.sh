@@ -1,3 +1,5 @@
+just update this script:
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -60,41 +62,11 @@ grep -q '^amplify/backend/function/' /tmp/changed.txt && FUNCTION_CHANGED=1
 grep -q '^amplify/backend/api/' /tmp/changed.txt && API_CHANGED=1
 grep -q '^amplify/backend/api/.*/transform\.conf\.json$' /tmp/changed.txt && { TRANSFORM_CHANGED=1; API_CHANGED=1; }
 
-# -------- Fallback helper + guarded runner (NEW) --------
-fallback_full_push() {
-  log "FALLBACK: Running 'amplifyPush --simple' (or pull+push if helper missing)..."
-  if command -v amplifyPush >/dev/null 2>&1; then
-    amplifyPush --simple
-  else
-    amplify pull --yes --appId "$AMPLIFY_APP_ID" --envName "$ENV_NAME"
-    amplify push --yes
-  fi
-}
-
-# Patterns seen when CLI decides there is nothing to deploy
-NOCHANGE_RE='No changes detected|No Change|No updates|No resources to update|There are no resources to update|No Stack changes|no changes found'
-
-run_and_maybe_fallback() {
-  local tmp_log
-  tmp_log="$(mktemp)"
-  set +e
-  # shellcheck disable=SC2068
-  "$@" 2>&1 | tee "$tmp_log"
-  local exit_code=${PIPESTATUS[0]}
-  set -e
-  if grep -qiE "$NOCHANGE_RE" "$tmp_log"; then
-    log "Detected 'no changes' during: $* → switching to fallback."
-    fallback_full_push
-    exit $?
-  fi
-  return $exit_code
-}
-
-# If both changed, do a full push path now (guarded)
+# If both changed, do a full push path now
 if [[ "$FUNCTION_CHANGED" -eq 1 && "$API_CHANGED" -eq 1 ]]; then
   log "Functions AND API changed → amplify pull + full push"
   amplify pull --yes --appId "$AMPLIFY_APP_ID" --envName "$ENV_NAME"
-  run_and_maybe_fallback amplify push --yes
+  amplify push --yes
   exit 0
 fi
 
@@ -211,6 +183,7 @@ fi
 # -------- Authoritative check via Amplify status (ANSI-safe) --------
 STATUS_JSON="$(mktemp)"
 
+# Try to suppress colors at the source; then strip any stray ANSI + CRs
 export NO_COLOR=1
 export FORCE_COLOR=0
 amplify status --json \
@@ -218,6 +191,7 @@ amplify status --json \
   | tr -d '\r' \
   > "$STATUS_JSON"
 
+# Optional: quick JSON validation (non-fatal)
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$STATUS_JSON" >/dev/null 2>&1 || {
   log "WARNING: amplify status JSON looked odd even after ANSI strip; continuing with best effort."
 }
@@ -244,10 +218,10 @@ MISSING_IN_STATUS=$(
 if [[ "$FUNCTION_CHANGED" -eq 1 ]]; then
   if [[ -n "${MISSING_IN_STATUS:-}" ]]; then
     log "Status did not include some backend-config functions (${MISSING_IN_STATUS//$'\n'/, }); falling back to FULL push to force provisioning."
-    run_and_maybe_fallback amplify push --yes
+    amplify push --yes
   else
     log "Only functions changed → amplify function push"
-    run_and_maybe_fallback amplify function push --yes
+    amplify function push --yes
   fi
 
 elif [[ "$API_CHANGED" -eq 1 ]]; then
@@ -257,9 +231,9 @@ elif [[ "$API_CHANGED" -eq 1 ]]; then
     log "API changed → compiling before API push"
   fi
   amplify api gql-compile
-  run_and_maybe_fallback amplify api push --yes
+  amplify api push --yes
 
 else
   log "Other backend changes → full amplify push"
-  run_and_maybe_fallback amplify push --yes
+  amplify push --yes
 fi
