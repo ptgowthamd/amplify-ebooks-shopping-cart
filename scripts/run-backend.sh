@@ -60,14 +60,11 @@ grep -q '^amplify/backend/function/' /tmp/changed.txt && FUNCTION_CHANGED=1
 grep -q '^amplify/backend/api/' /tmp/changed.txt && API_CHANGED=1
 grep -q '^amplify/backend/api/.*/transform\.conf\.json$' /tmp/changed.txt && { TRANSFORM_CHANGED=1; API_CHANGED=1; }
 
+# If both changed, do a full push path now
 if [[ "$FUNCTION_CHANGED" -eq 1 && "$API_CHANGED" -eq 1 ]]; then
-  log "Functions AND API changed → amplifyPush --simple (pull + full push)"
-  if command -v amplifyPush >/dev/null 2>&1; then
-    amplifyPush --simple
-  else
-    amplify pull --yes --appId "$AMPLIFY_APP_ID" --envName "$ENV_NAME"
-    amplify push --yes
-  fi
+  log "Functions AND API changed → amplify pull + full push"
+  amplify pull --yes --appId "$AMPLIFY_APP_ID" --envName "$ENV_NAME"
+  amplify push --yes
   exit 0
 fi
 
@@ -82,10 +79,21 @@ mapfile -t FUNC_DIRS < <(grep -oE '^amplify/backend/function/[^/]+/' /tmp/change
 mapfile -t SCHEMA_FILES_SINGLE < <(grep -oE '^amplify/backend/api/[^/]+/schema\.graphql$' /tmp/changed.txt | sort -u || true)
 mapfile -t SCHEMA_FILES_SPLIT  < <(grep -oE '^amplify/backend/api/[^/]+/schema/.*\.graphql$' /tmp/changed.txt | sort -u || true)
 
-# -------- Pull local state if needed; protect edited files --------
+# -------- Pull local state decision --------
+# Default: need pull if no local state present
 NEED_PULL=0
 [[ ! -f amplify/backend/amplify-meta.json ]] && NEED_PULL=1
 [[ ! -f amplify/.config/local-env-info.json ]] && NEED_PULL=1
+
+# IMPORTANT: if we detected local backend changes, SKIP the pull to avoid clobbering new resources.
+if [[ "$FUNCTION_CHANGED" -eq 1 || "$API_CHANGED" -eq 1 ]]; then
+  if [[ "$NEED_PULL" -eq 1 ]]; then
+    log "Local changes detected but local state missing; will PULL once, then restore/override."
+  else
+    NEED_PULL=0
+    log "Local changes detected; skipping headless pull to avoid overwriting local backend state."
+  fi
+fi
 
 backup_path() {
   local p="$1"
@@ -103,7 +111,7 @@ restore_path() {
   tar -xf "$key" -C "$(dirname "$p")"
 }
 
-# Protect config & meta so pull can't drop your new resources.
+# Protect config & (if present) meta so pull can't drop your new resources.
 CONFIG_FILES=(
   "amplify/backend/backend-config.json"
   "amplify/backend/amplify-meta.json"
@@ -117,7 +125,7 @@ if (( ${#SCHEMA_FILES_SPLIT[@]} > 0 )); then
 fi
 
 if [[ "$NEED_PULL" -eq 1 ]]; then
-  # Back up changed function dirs, schema, and protected config/meta
+  # Back up changed function dirs, schema, and protected config/meta (if they exist)
   if (( ${#FUNC_DIRS[@]} > 0 )); then
     for d in "${FUNC_DIRS[@]}"; do backup_path "$d"; done
   fi
@@ -171,10 +179,37 @@ if (( ${#FUNC_DIRS_ON_DISK[@]} > 0 )); then
   fi
 fi
 
-# -------- Category-scoped push with a compile pre-step --------
+# -------- Authoritative check via Amplify status --------
+STATUS_JSON="$(mktemp)"
+amplify status --json > "$STATUS_JSON" || { log "ERROR: amplify status failed"; cat "$STATUS_JSON" || true; exit 1; }
+
+# Which functions does status think need action?
+mapfile -t STATUS_FUNCTIONS < <(node -e 'const s=require(process.argv[1]);
+const a=[...(s.resourcesToBeCreated||[]),...(s.resourcesToBeUpdated||[])];
+console.log(a.filter(r=>r.category==="function").map(r=>r.resourceName).join("\n"))' "$STATUS_JSON" | sort -u || true)
+
+# Which functions exist in backend-config?
+mapfile -t CONFIG_FUNCTIONS < <(node -e 'const fs=require("fs");const p="amplify/backend/backend-config.json";
+const j=JSON.parse(fs.readFileSync(p,"utf8"));console.log(Object.keys(j.function||{}).join("\n"))' | sort -u || true)
+
+log "Functions needing action per 'amplify status': ${STATUS_FUNCTIONS[*]:-(none)}"
+
+# Detect any functions present in backend-config but NOT in status create/update set
+MISSING_IN_STATUS=$(
+  comm -23 \
+    <(printf "%s\n" "${CONFIG_FUNCTIONS[@]}" | sort) \
+    <(printf "%s\n" "${STATUS_FUNCTIONS[@]}" | sort) || true
+)
+
+# -------- Category-scoped push with safe fallback --------
 if [[ "$FUNCTION_CHANGED" -eq 1 ]]; then
-  log "Only functions changed → amplify function push"
-  amplify function push --yes
+  if [[ -n "${MISSING_IN_STATUS:-}" ]]; then
+    log "Status did not include some backend-config functions (${MISSING_IN_STATUS//$'\n'/, }); falling back to FULL push to force provisioning."
+    amplify push --yes
+  else
+    log "Only functions changed → amplify function push"
+    amplify function push --yes
+  fi
 
 elif [[ "$API_CHANGED" -eq 1 ]]; then
   if [[ "$TRANSFORM_CHANGED" -eq 1 ]]; then
