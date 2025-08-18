@@ -1,5 +1,3 @@
-just update this script:
-
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -223,7 +221,6 @@ if [[ "$FUNCTION_CHANGED" -eq 1 ]]; then
   #   log "Only functions changed → amplify function push"
   # amplify function push --yes
   amplify push function testFunctionNew2 --yes
-fi
 
 elif [[ "$API_CHANGED" -eq 1 ]]; then
   if [[ "$TRANSFORM_CHANGED" -eq 1 ]]; then
