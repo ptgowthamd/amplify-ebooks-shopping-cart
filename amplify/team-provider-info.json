@@ -13,7 +13,8 @@
     },
     "categories": {
       "function": {
-        "testFunction01": {}
+        "testFunction01": {},
+        "testFunction02": {}
       }
     }
   }
