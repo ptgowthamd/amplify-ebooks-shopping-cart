@@ -23,7 +23,7 @@
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     },
-    "testFunction02": {
+    "testFunctonNew": {
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"

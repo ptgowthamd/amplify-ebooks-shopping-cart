@@ -49,13 +49,13 @@
             "FunctionName": {
                 "Fn::If": [
                     "ShouldNotCreateEnvResources",
-                    "testFunction02",
+                    "testFunctonNew",
                     {
 
                         "Fn::Join": [
                             "",
                             [
-                                "testFunction02",
+                                "testFunctonNew",
                                 "-",
                                 {
                                     "Ref": "env"
@@ -80,13 +80,13 @@
                 "RoleName": {
                     "Fn::If": [
                         "ShouldNotCreateEnvResources",
-                        "ebooksshoppingcartLambdaRole80194496",
+                        "ebooksshoppingcartLambdaRole7b03f638",
                         {
 
                             "Fn::Join": [
                                 "",
                                 [
-                                    "ebooksshoppingcartLambdaRole80194496",
+                                    "ebooksshoppingcartLambdaRole7b03f638",
                                     "-",
                                     {
                                         "Ref": "env"
