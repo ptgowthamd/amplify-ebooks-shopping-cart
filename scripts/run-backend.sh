@@ -80,12 +80,11 @@ mapfile -t SCHEMA_FILES_SINGLE < <(grep -oE '^amplify/backend/api/[^/]+/schema\.
 mapfile -t SCHEMA_FILES_SPLIT  < <(grep -oE '^amplify/backend/api/[^/]+/schema/.*\.graphql$' /tmp/changed.txt | sort -u || true)
 
 # -------- Pull local state decision --------
-# Default: need pull if no local state present
 NEED_PULL=0
 [[ ! -f amplify/backend/amplify-meta.json ]] && NEED_PULL=1
 [[ ! -f amplify/.config/local-env-info.json ]] && NEED_PULL=1
 
-# IMPORTANT: if we detected local backend changes, SKIP the pull to avoid clobbering new resources.
+# Skip pull if local backend changes are present and local state exists
 if [[ "$FUNCTION_CHANGED" -eq 1 || "$API_CHANGED" -eq 1 ]]; then
   if [[ "$NEED_PULL" -eq 1 ]]; then
     log "Local changes detected but local state missing; will PULL once, then restore/override."
@@ -111,7 +110,7 @@ restore_path() {
   tar -xf "$key" -C "$(dirname "$p")"
 }
 
-# Protect config & (if present) meta so pull can't drop your new resources.
+# Protect config & meta so pull can't drop your new resources.
 CONFIG_FILES=(
   "amplify/backend/backend-config.json"
   "amplify/backend/amplify-meta.json"
@@ -179,9 +178,21 @@ if (( ${#FUNC_DIRS_ON_DISK[@]} > 0 )); then
   fi
 fi
 
-# -------- Authoritative check via Amplify status --------
+# -------- Authoritative check via Amplify status (ANSI-safe) --------
 STATUS_JSON="$(mktemp)"
-amplify status --json > "$STATUS_JSON" || { log "ERROR: amplify status failed"; cat "$STATUS_JSON" || true; exit 1; }
+
+# Try to suppress colors at the source; then strip any stray ANSI + CRs
+export NO_COLOR=1
+export FORCE_COLOR=0
+amplify status --json \
+  | sed -E $'s/\x1B\[[0-9;]*[A-Za-z]//g' \
+  | tr -d '\r' \
+  > "$STATUS_JSON"
+
+# Optional: quick JSON validation (non-fatal)
+node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$STATUS_JSON" >/dev/null 2>&1 || {
+  log "WARNING: amplify status JSON looked odd even after ANSI strip; continuing with best effort."
+}
 
 # Which functions does status think need action?
 mapfile -t STATUS_FUNCTIONS < <(node -e 'const s=require(process.argv[1]);
