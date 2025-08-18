@@ -106,7 +106,7 @@ backend:
 
           if [ "$FUNCTION_CHANGED" -eq 1 ]; then
             echo "Only functions changed → amplify function push"
-            amplify function push --yes
+            amplify function push testFunctionNew3 --yes
           elif [ "$API_CHANGED" -eq 1 ]; then
             echo "Only API changed → amplify api push"
             amplify api push --yes

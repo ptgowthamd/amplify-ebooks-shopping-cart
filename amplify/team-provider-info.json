@@ -23,7 +23,7 @@
         },
         "testFunctionNew2": {
           "deploymentBucketName": "amplify-ebooksshoppingcart-dev-2dec3-deployment",
-          "s3Key": "amplify-builds/testFunctionNew2-483463326274422f7747-build.zip"
+          "s3Key": "amplify-builds/testFunctionNew2-317250744838557a6c54-build.zip"
         },
         "testFunctionNew3": {}
       },
