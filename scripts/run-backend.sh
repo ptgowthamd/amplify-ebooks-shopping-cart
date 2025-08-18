@@ -103,8 +103,11 @@ restore_path() {
   tar -xf "$key" -C "$(dirname "$p")"
 }
 
-# Protect backend-config.json so pull can't drop your new resources.
-CONFIG_FILES=( "amplify/backend/backend-config.json" )
+# Protect config & meta so pull can't drop your new resources.
+CONFIG_FILES=(
+  "amplify/backend/backend-config.json"
+  "amplify/backend/amplify-meta.json"
+)
 
 # Build split-schema dir list only when needed
 if (( ${#SCHEMA_FILES_SPLIT[@]} > 0 )); then
@@ -114,7 +117,7 @@ if (( ${#SCHEMA_FILES_SPLIT[@]} > 0 )); then
 fi
 
 if [[ "$NEED_PULL" -eq 1 ]]; then
-  # Back up changed function dirs, schema, and backend-config.json
+  # Back up changed function dirs, schema, and protected config/meta
   if (( ${#FUNC_DIRS[@]} > 0 )); then
     for d in "${FUNC_DIRS[@]}"; do backup_path "$d"; done
   fi
